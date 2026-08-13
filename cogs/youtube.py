@@ -169,9 +169,11 @@ class YouTubeCog(commands.Cog):
                                 is_actually_live = True
                     except Exception as e:
                         print(f"API verification failed: {e}")
-                        is_actually_live = True # fallback
+                        is_actually_live = False
                 else:
-                    is_actually_live = True
+                    # Strict HTML check if YouTube API is not setup
+                    if '"liveBroadcastDetails":' in html and '"isLiveNow":true' in html:
+                        is_actually_live = True
 
                 if is_actually_live:
                     if self.video_id != live_vid or not self.chat_task:
