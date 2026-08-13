@@ -1,3 +1,11 @@
 .env
 __pycache__/
+cogs/__pycache__/
 *.pyc
+*.log
+memory.json
+token.json
+credentials.json
+.vscode/
+.gemini/
+

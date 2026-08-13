@@ -7,8 +7,10 @@ class WelcomeCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        # Find the system channel or general channel
-        channel = member.guild.system_channel
+        # Find the new professional welcome channel
+        channel = discord.utils.get(member.guild.text_channels, name='👋・welcome')
+        if not channel:
+            channel = member.guild.system_channel
         if not channel:
             # Fallback to finding a channel named 'general'
             channel = discord.utils.get(member.guild.text_channels, name='general')

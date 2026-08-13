@@ -12,6 +12,7 @@ TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True # Required for welcome message
+intents.presences = True # Required to see who is online
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -22,13 +23,12 @@ async def on_ready():
     await bot.change_presence(activity=discord.Game(name="Chatting & Managing"))
 
 async def load_cogs():
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            try:
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f'Loaded extension: {filename}')
-            except Exception as e:
-                print(f'Failed to load extension {filename}: {e}')
+    for cog in ['cogs.chat', 'cogs.moderation', 'cogs.welcome', 'cogs.live_invite', 'cogs.youtube', 'cogs.leveling', 'cogs.roles']:
+        try:
+            await bot.load_extension(cog)
+            print(f'Loaded extension: {cog}')
+        except Exception as e:
+            print(f'Failed to load extension {cog}: {e}')
 
 async def main():
     async with bot:
