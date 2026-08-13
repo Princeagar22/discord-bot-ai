@@ -190,6 +190,14 @@ class YouTubeCog(commands.Cog):
     @auto_detect_loop.before_loop
     async def before_auto_detect(self):
         await self.bot.wait_until_ready()
+        # Lock livechat channel immediately on bot startup until live stream is confirmed
+        try:
+            if self.live_chat_channel_id:
+                channel = self.bot.get_channel(int(self.live_chat_channel_id))
+                if channel:
+                    await self.set_channel_lock(channel, locked=True)
+        except Exception as e:
+            print(f"Initial lock error: {e}")
 
     async def set_channel_lock(self, channel, locked: bool):
         if not channel:
