@@ -156,8 +156,9 @@ class YouTubeCog(commands.Cog):
                         live_vid = m2.group(1)
 
             if live_vid:
-                # Verify via API if it is TRULY live
+                # Verify if this video ID is TRULY an active live stream right now
                 is_actually_live = False
+                
                 if self.yt_api:
                     try:
                         def check_live():
@@ -169,24 +170,38 @@ class YouTubeCog(commands.Cog):
                                 is_actually_live = True
                     except Exception as e:
                         print(f"API verification failed: {e}")
+                
+                # If API didn't confirm or is not available, verify directly via pytchat
+                if not is_actually_live:
+                    try:
+                        def check_pytchat():
+                            try:
+                                chat = pytchat.create(video_id=live_vid)
+                                alive = chat.is_alive()
+                                chat.terminate()
+                                return alive
+                            except Exception:
+                                return False
+                        is_actually_live = await asyncio.to_thread(check_pytchat)
+                    except Exception as e:
+                        print(f"Pytchat verification error: {e}")
                         is_actually_live = False
-                else:
-                    # Strict HTML check if YouTube API is not setup
-                    if '"liveBroadcastDetails":' in html and '"isLiveNow":true' in html:
-                        is_actually_live = True
 
                 if is_actually_live:
                     if self.video_id != live_vid or not self.chat_task:
                         await channel.send(f"🚨 **AUTO-DETECT:** `@{self.youtube_handle}` is now LIVE! (Video ID: `{live_vid}`). Starting chat sync automatically...")
                         await self.start_sync(live_vid, channel)
                 else:
-                    # Not actually live, so stop if we were syncing this
+                    # Stream is offline -> LOCK livechat channel & stop sync
+                    await self.set_channel_lock(channel, locked=True)
                     if self.video_id and self.chat_task:
-                        await channel.send("🛑 **AUTO-DETECT:** Stream has ended. Stopping chat sync automatically.")
+                        await channel.send("🛑 **AUTO-DETECT:** Stream has ended. Locking `#🔴・livechat` channel.")
                         await self.stop_sync()
             else:
+                # Stream is offline -> LOCK livechat channel & stop sync
+                await self.set_channel_lock(channel, locked=True)
                 if self.video_id and self.chat_task:
-                    await channel.send("🛑 **AUTO-DETECT:** Stream has ended. Stopping chat sync automatically.")
+                    await channel.send("🛑 **AUTO-DETECT:** Stream has ended. Locking `#🔴・livechat` channel.")
                     await self.stop_sync()
 
         except Exception as e:
