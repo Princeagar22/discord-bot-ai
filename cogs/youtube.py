@@ -252,12 +252,8 @@ class YouTubeCog(commands.Cog):
         # Unlock the channel when we start syncing
         await self.set_channel_lock(channel, locked=False)
         
-        # Get liveChatId using YouTube API
+        # Get liveChatId using YouTube API if credentials available
         self.active_live_chat_id = await asyncio.to_thread(self.get_live_chat_id, video_id)
-        if self.active_live_chat_id:
-            await channel.send("✅ Successfully connected to YouTube API! The AI can now reply directly on YouTube.")
-        else:
-            await channel.send("⚠️ Connected, but could not get YouTube API Chat ID. AI replies will only show on Discord.")
 
         # Initialize InnerTube Token & API Key directly from YouTube live page
         try:
@@ -287,7 +283,12 @@ class YouTubeCog(commands.Cog):
             print(f"Pytchat init fallback error: {e}")
             
         self.chat_task = self.bot.loop.create_task(self.sync_loop())
-        await channel.send(f"🟢 YouTube live chat connected! Messages will appear here.")
+        
+        status_msg = "🟢 **YouTube live chat connected! Messages will appear here.**"
+        if self.active_live_chat_id:
+            status_msg += " *(AI replies enabled on YouTube 💬)*"
+            
+        await channel.send(status_msg)
 
     async def stop_sync(self):
         channel = self.sync_channel
