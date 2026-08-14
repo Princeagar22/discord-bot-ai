@@ -7,6 +7,7 @@ import re
 import os
 import json
 import hashlib
+import time
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -24,6 +25,7 @@ class YouTubeCog(commands.Cog):
         self.sent_messages = set()
         self.bot_channel_name = None
         self.bot_channel_id = None
+        self.bot_custom_url = None
         
         self.stream_stats = {"viewers": "Unknown", "likes": "Unknown"}
         self.recent_owner_messages = []
@@ -34,6 +36,8 @@ class YouTubeCog(commands.Cog):
         self.continuation_token = None
         self.innertube_key = None
         self.seen_chat_ids = set()
+        self.sync_start_time_usec = 0
+        self.last_ai_reply_time = 0
         
         self.setup_youtube_api()
         
@@ -246,6 +250,8 @@ class YouTubeCog(commands.Cog):
         self.sync_channel = channel
         self.seen_chat_ids.clear()
         self.is_first_sync_poll = True
+        self.sync_start_time_usec = int(time.time() * 1_000_000)
+        self.last_ai_reply_time = time.time()
         
         # Clear the old chat before starting the new one
         try:
@@ -281,11 +287,6 @@ class YouTubeCog(commands.Cog):
         except Exception as e:
             print(f"InnerTube token init error: {e}")
 
-        try:
-            self.live_chat = pytchat.create(video_id=self.video_id)
-        except Exception as e:
-            print(f"Pytchat init fallback error: {e}")
-            
         self.chat_task = self.bot.loop.create_task(self.sync_loop())
         
         status_msg = "🟢 **YouTube live chat connected! Messages will appear here.**"
@@ -514,11 +515,29 @@ class YouTubeCog(commands.Cog):
                                                 if len(self.seen_chat_ids) > 1000:
                                                     self.seen_chat_ids.clear()
 
+                                            # 1. Ignore old messages that were sent before the bot connected to the stream
+                                            msg_timestamp_usec = int(renderer.get("timestampUsec", 0))
+                                            if msg_timestamp_usec > 0 and msg_timestamp_usec < self.sync_start_time_usec:
+                                                continue
+
                                             author_name = renderer.get("authorName", {}).get("simpleText", "Viewer")
                                             msg_runs = renderer.get("message", {}).get("runs", [])
                                             message_text = "".join([r.get("text", "") for r in msg_runs]).strip()
                                             
                                             if not message_text:
+                                                continue
+
+                                            # 2. Hard block any message sent by our bot account or self
+                                            author_clean = author_name.replace('@', '').strip().lower()
+                                            if 'ggs' in author_clean or 'devilyt' in author_clean or author_clean.endswith('bot'):
+                                                continue
+                                            if self.bot_channel_name and author_clean == self.bot_channel_name.replace('@', '').strip().lower():
+                                                continue
+                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url and author_clean == self.bot_custom_url.replace('@', '').strip().lower():
+                                                continue
+
+                                            if message_text in self.sent_messages:
+                                                self.sent_messages.remove(message_text)
                                                 continue
 
                                             thumbnails = renderer.get("authorPhoto", {}).get("thumbnails", [{}])
@@ -528,21 +547,6 @@ class YouTubeCog(commands.Cog):
                                             is_owner = any("owner" in str(b).lower() or "broadcaster" in str(b).lower() for b in badges)
                                             is_mod = any("moderator" in str(b).lower() for b in badges)
                                             is_member = any("member" in str(b).lower() or "sponsor" in str(b).lower() for b in badges)
-
-                                            # Filter out messages sent by our own bot account to prevent infinite echo loops
-                                            author_clean = author_name.replace('@', '').strip().lower()
-                                            bot_names = ['ggs-bot', 'ggs bot', 'devilyt']
-                                            if self.bot_channel_name:
-                                                bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
-                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
-                                                bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
-                                                
-                                            if author_clean in bot_names or ('ggs' in author_clean and 'bot' in author_clean):
-                                                continue
-
-                                            if message_text in self.sent_messages:
-                                                self.sent_messages.remove(message_text)
-                                                continue
 
                                             msg_lower = message_text.lower()
 
@@ -620,9 +624,18 @@ class YouTubeCog(commands.Cog):
                 self.video_id = None 
 
     async def process_ai_reply(self, message_text, author_name):
+        clean_author = author_name.replace('@', '').strip()
+        clean_author_lower = clean_author.lower()
+        if 'ggs' in clean_author_lower or 'devilyt' in clean_author_lower or clean_author_lower.endswith('bot'):
+            return
+
+        now = time.time()
+        if now - self.last_ai_reply_time < 4.0:
+            return
+        self.last_ai_reply_time = now
+
         chat_cog = self.bot.get_cog("ChatCog")
         if chat_cog:
-            clean_author = author_name.replace('@', '').strip()
             prompt = message_text
             
             owner_context = "\n".join(self.recent_owner_messages[-3:]) if self.recent_owner_messages else "None"
