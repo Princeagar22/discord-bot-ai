@@ -645,7 +645,7 @@ class YouTubeCog(commands.Cog):
         if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
             bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
 
-        if clean_author_lower in bot_names:
+        if clean_author_lower in bot_names or ('ggs' in clean_author_lower and 'bot' in clean_author_lower):
             return
 
         now = time.time()
