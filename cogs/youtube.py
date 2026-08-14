@@ -515,11 +515,6 @@ class YouTubeCog(commands.Cog):
                                                 if len(self.seen_chat_ids) > 1000:
                                                     self.seen_chat_ids.clear()
 
-                                            # 1. Ignore old messages that were sent before the bot connected to the stream
-                                            msg_timestamp_usec = int(renderer.get("timestampUsec", 0))
-                                            if msg_timestamp_usec > 0 and msg_timestamp_usec < self.sync_start_time_usec:
-                                                continue
-
                                             author_name = renderer.get("authorName", {}).get("simpleText", "Viewer")
                                             msg_runs = renderer.get("message", {}).get("runs", [])
                                             message_text = "".join([r.get("text", "") for r in msg_runs]).strip()
@@ -527,13 +522,15 @@ class YouTubeCog(commands.Cog):
                                             if not message_text:
                                                 continue
 
-                                            # 2. Hard block any message sent by our bot account or self
+                                            # 1. Hard block any message sent by our bot account or self
                                             author_clean = author_name.replace('@', '').strip().lower()
-                                            if 'ggs' in author_clean or 'devilyt' in author_clean or author_clean.endswith('bot'):
-                                                continue
-                                            if self.bot_channel_name and author_clean == self.bot_channel_name.replace('@', '').strip().lower():
-                                                continue
-                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url and author_clean == self.bot_custom_url.replace('@', '').strip().lower():
+                                            bot_names = ['ggs-bot', 'ggs bot', 'ggs_bot', 'devilyt']
+                                            if self.bot_channel_name:
+                                                bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
+                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
+                                                bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
+
+                                            if author_clean in bot_names:
                                                 continue
 
                                             if message_text in self.sent_messages:
@@ -626,11 +623,17 @@ class YouTubeCog(commands.Cog):
     async def process_ai_reply(self, message_text, author_name):
         clean_author = author_name.replace('@', '').strip()
         clean_author_lower = clean_author.lower()
-        if 'ggs' in clean_author_lower or 'devilyt' in clean_author_lower or clean_author_lower.endswith('bot'):
+        bot_names = ['ggs-bot', 'ggs bot', 'ggs_bot', 'devilyt']
+        if self.bot_channel_name:
+            bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
+        if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
+            bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
+
+        if clean_author_lower in bot_names:
             return
 
         now = time.time()
-        if now - self.last_ai_reply_time < 4.0:
+        if now - self.last_ai_reply_time < 3.0:
             return
         self.last_ai_reply_time = now
 
