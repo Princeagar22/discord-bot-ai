@@ -27,6 +27,9 @@ class YouTubeCog(commands.Cog):
         
         self.stream_stats = {"viewers": "Unknown", "likes": "Unknown"}
         self.recent_owner_messages = []
+        self.party_code = None
+        self.server_region = None
+        self.pinned_banner = None
         
         self.setup_youtube_api()
         
@@ -122,6 +125,29 @@ class YouTubeCog(commands.Cog):
             return True
         except Exception as e:
             print(f"Error posting to YouTube chat: {e}")
+            return False
+
+    def post_youtube_banner(self, banner_text):
+        if not self.yt_api or not self.active_live_chat_id:
+            return False
+        try:
+            self.yt_api.liveChatBanners().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "liveChatId": self.active_live_chat_id,
+                        "bannerSnippet": {
+                            "liveChatPaymentDetails": None,
+                            "textDetails": {
+                                "messageText": banner_text
+                            }
+                        }
+                    }
+                }
+            ).execute()
+            return True
+        except Exception as e:
+            print(f"Error posting live chat banner: {e}")
             return False
 
     def cog_unload(self):
@@ -279,6 +305,98 @@ class YouTubeCog(commands.Cog):
     async def ytstop(self, ctx):
         await self.stop_sync()
         await ctx.send("🛑 YouTube live chat sync manually stopped.")
+
+    @commands.command(name="code", aliases=["party", "setcode"])
+    async def code_cmd(self, ctx, *, party_code: str = None):
+        if party_code:
+            self.party_code = party_code.strip()
+            embed = discord.Embed(
+                title="🎮 Party Code Updated!",
+                description=f"Active Room / Party Code: **`{self.party_code}`**",
+                color=discord.Color.green()
+            )
+            await ctx.send(embed=embed)
+            if self.active_live_chat_id:
+                await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"🎮 ACTIVE PARTY CODE: {self.party_code}")
+        else:
+            if self.party_code:
+                await ctx.send(f"🎮 Current Party Code is: **`{self.party_code}`**")
+            else:
+                await ctx.send("🎮 No party code is set right now. Use `!code <code>` to set one.")
+
+    @commands.command(name="region", aliases=["setregion", "server"])
+    async def region_cmd(self, ctx, *, server_region: str = None):
+        if server_region:
+            self.server_region = server_region.strip()
+            embed = discord.Embed(
+                title="🌐 Server Region Updated!",
+                description=f"Active Game Region: **`{self.server_region}`**",
+                color=discord.Color.blue()
+            )
+            await ctx.send(embed=embed)
+            if self.active_live_chat_id:
+                await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"🌐 ACTIVE SERVER REGION: {self.server_region}")
+        else:
+            if self.server_region:
+                await ctx.send(f"🌐 Current Server Region is: **`{self.server_region}`**")
+            else:
+                await ctx.send("🌐 No server region is set right now. Use `!region <region>` to set one.")
+
+    @commands.command(name="ytpin", aliases=["pin"])
+    @commands.has_permissions(administrator=True)
+    async def pin_cmd(self, ctx, *, banner_text: str = None):
+        if banner_text:
+            self.pinned_banner = banner_text.strip()
+            embed = discord.Embed(
+                title="📌 STREAM ANNOUNCEMENT PINNED",
+                description=f"**{self.pinned_banner}**",
+                color=discord.Color.gold()
+            )
+            msg = await ctx.send(embed=embed)
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+            
+            # Post to YouTube Live Chat Banner or Message
+            if self.active_live_chat_id:
+                success = await asyncio.to_thread(self.post_youtube_banner, self.pinned_banner)
+                if not success:
+                    await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"📌 [PINNED]: {self.pinned_banner}")
+        else:
+            if self.pinned_banner:
+                await ctx.send(f"📌 Pinned Banner: **`{self.pinned_banner}`**")
+            else:
+                await ctx.send("📌 No live banner is currently pinned. Use `!ytpin <text>` to pin one.")
+
+    @commands.command(name="ytunpin", aliases=["unpin"])
+    @commands.has_permissions(administrator=True)
+    async def unpin_cmd(self, ctx):
+        self.pinned_banner = None
+        await ctx.send("📌 Stream announcement unpinned.")
+
+    @commands.command(name="streaminfo", aliases=["info", "stream"])
+    async def streaminfo_cmd(self, ctx):
+        embed = discord.Embed(title=f"📺 YouTube Stream Info - @{self.youtube_handle}", color=discord.Color.purple())
+        embed.add_field(name="🎮 Party Code", value=f"`{self.party_code}`" if self.party_code else "Not Set", inline=True)
+        embed.add_field(name="🌐 Region", value=f"`{self.server_region}`" if self.server_region else "Not Set", inline=True)
+        embed.add_field(name="🔴 Stream Status", value=f"**LIVE** (`{self.video_id}`)" if (self.video_id and self.chat_task) else "**OFFLINE**", inline=True)
+        if self.pinned_banner:
+            embed.add_field(name="📌 Pinned Note", value=self.pinned_banner, inline=False)
+        embed.set_footer(text=f"YouTube: https://www.youtube.com/@{self.youtube_handle}")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="announce", aliases=["say"])
+    @commands.has_permissions(administrator=True)
+    async def announce_cmd(self, ctx, *, message_text: str):
+        embed = discord.Embed(
+            title="📢 OFFICIAL ANNOUNCEMENT",
+            description=message_text,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        if self.active_live_chat_id:
+            await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"📢 ANNOUNCEMENT: {message_text}")
 
     async def sync_loop(self):
         try:

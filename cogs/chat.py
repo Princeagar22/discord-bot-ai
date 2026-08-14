@@ -183,8 +183,17 @@ OUTPUT:
 - Output ONLY the exact Discord message GGS should send.
 - No analysis, explanations, prefixes ("GGS:"), quotes, JSON, code, or internal reasoning."""
 
-        if allow_tools:
-            system_prompt += "\n4. You have superpowers: You can CREATE CHANNELS and DELETE/PURGE MESSAGES. IMPORTANT RULE: DO NOT use these tools unless the user EXPLICITLY asks you to create a channel or delete messages. Do NOT use tools to be funny or proactive."
+        yt_cog = self.bot.get_cog('YouTubeCog')
+        if yt_cog:
+            stream_info_items = []
+            if yt_cog.party_code:
+                stream_info_items.append(f"- Active Party / Room Code: {yt_cog.party_code}")
+            if yt_cog.server_region:
+                stream_info_items.append(f"- Active Server Region: {yt_cog.server_region}")
+            if yt_cog.pinned_banner:
+                stream_info_items.append(f"- Pinned Stream Announcement: {yt_cog.pinned_banner}")
+            if stream_info_items:
+                system_prompt += "\n\nLIVE STREAM FACTS:\n" + "\n".join(stream_info_items)
 
         if user_id_str not in self.history:
             self.history[user_id_str] = []
