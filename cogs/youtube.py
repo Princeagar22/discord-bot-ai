@@ -30,6 +30,9 @@ class YouTubeCog(commands.Cog):
         self.party_code = None
         self.server_region = None
         self.pinned_banner = None
+        self.continuation_token = None
+        self.innertube_key = None
+        self.seen_chat_ids = set()
         
         self.setup_youtube_api()
         
@@ -238,6 +241,7 @@ class YouTubeCog(commands.Cog):
         await self.stop_sync()
         self.video_id = video_id
         self.sync_channel = channel
+        self.seen_chat_ids.clear()
         
         # Clear the old chat before starting the new one
         try:
@@ -255,14 +259,30 @@ class YouTubeCog(commands.Cog):
         else:
             await channel.send("⚠️ Connected, but could not get YouTube API Chat ID. AI replies will only show on Discord.")
 
+        # Initialize InnerTube Token & API Key directly from YouTube live page
+        try:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    html = await response.text()
+                    
+            m_key = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', html)
+            if m_key:
+                self.innertube_key = m_key.group(1)
+                
+            m_token = re.search(r'"liveChatRenderer":\s*{"header":.+?"continuation":"([^"]+)"', html)
+            if not m_token:
+                m_token = re.search(r'"continuation":"([^"]+)"', html)
+            if m_token:
+                self.continuation_token = m_token.group(1)
+        except Exception as e:
+            print(f"InnerTube token init error: {e}")
+
         try:
             self.live_chat = pytchat.create(video_id=self.video_id)
-            if not self.live_chat.is_alive():
-                await channel.send(f"⚠️ Could not connect to chat for video `{video_id}`.")
-                return
         except Exception as e:
-            await channel.send(f"⚠️ Error connecting to YouTube: {e}")
-            return
+            print(f"Pytchat init fallback error: {e}")
             
         self.chat_task = self.bot.loop.create_task(self.sync_loop())
         await channel.send(f"🟢 YouTube live chat connected! Messages will appear here.")
@@ -290,6 +310,9 @@ class YouTubeCog(commands.Cog):
             self.live_chat = None
         self.video_id = None
         self.active_live_chat_id = None
+        self.continuation_token = None
+        self.innertube_key = None
+        self.seen_chat_ids.clear()
 
     @commands.command()
     @commands.has_permissions(administrator=True)
@@ -399,83 +422,137 @@ class YouTubeCog(commands.Cog):
             await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"📢 ANNOUNCEMENT: {message_text}")
 
     async def sync_loop(self):
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         try:
-            while self.live_chat and self.live_chat.is_alive():
-                chat_data = await asyncio.to_thread(self.live_chat.get)
+            while self.video_id:
+                fetched_any = False
                 
-                for c in chat_data.sync_items():
-                    message_text = c.message
-                    author_name = c.author.name
-                    
-                    # PERFECT FIX: Ignore ANY message sent by our own bot account using Channel ID!
-                    if self.bot_channel_id and getattr(c.author, 'channelId', None) == self.bot_channel_id:
-                        continue
-                        
-                    # Fallback name check (ignoring @ symbols)
-                    if self.bot_channel_name:
-                        stripped_author = author_name.replace('@', '').strip().lower()
-                        stripped_bot = self.bot_channel_name.replace('@', '').strip().lower()
-                        if stripped_author == stripped_bot:
-                            continue
-                    
-                    # Prevent echoing messages that we just sent from Discord (fallback)
-                    if message_text in self.sent_messages:
-                        self.sent_messages.remove(message_text)
-                        continue
-                    
-                    # Create a beautiful embed for the message
-                    embed = discord.Embed(description=message_text)
-                    
-                    # Determine color and badge based on role
-                    if c.author.isChatOwner:
-                        self.recent_owner_messages.append(message_text)
-                        if len(self.recent_owner_messages) > 5:
-                            self.recent_owner_messages.pop(0)
-                        embed.color = discord.Color.red()
-                        embed.set_author(name=f"👑 [OWNER] {author_name}", icon_url=c.author.imageUrl)
-                    elif c.author.isChatModerator:
-                        embed.color = discord.Color.blue()
-                        embed.set_author(name=f"🛡️ [MOD] {author_name}", icon_url=c.author.imageUrl)
-                    elif c.author.isChatSponsor:
-                        embed.color = discord.Color.green()
-                        embed.set_author(name=f"💎 [MEMBER] {author_name}", icon_url=c.author.imageUrl)
-                    else:
-                        color_val = int(hashlib.md5(author_name.encode()).hexdigest()[:6], 16)
-                        embed.color = discord.Color(color_val)
-                        embed.set_author(name=f"[YT] {author_name}", icon_url=c.author.imageUrl)
-                        
-                    await self.sync_channel.send(embed=embed)
-                    
-                    msg_lower = message_text.lower()
-                    
-                    # Flexible trigger words (matches hello, hellooo, hey, heyyy, yo, yoo etc)
-                    trigger_patterns = [
-                        r'\bggs+\b', r'\bhello+\b', r'\bhi+\b', r'\bheyy*\b', 
-                        r'how are you', r'\byoo*\b', r'wassup', r'\bsup\b', r"what's up",
-                        r'\bcode\b', r'\blike\b', r'\blikes\b'
-                    ]
-                    
-                    should_reply = False
-                    
-                    if c.author.isChatOwner:
-                        # Owner only triggers if they explicitly say 'ggs' or tag the bot
-                        if re.search(r'\bggs+\b', msg_lower) or "ggs-bot" in msg_lower:
-                            should_reply = True
-                    else:
-                        for pattern in trigger_patterns:
-                            if re.search(pattern, msg_lower):
-                                should_reply = True
-                                break
-                                
-                        # Random 10% chance to reply to ANY normal message (3+ words) from viewers to make it feel alive
-                        import random
-                        if not should_reply and len(msg_lower.split()) >= 3:
-                            if random.random() < 0.10:
-                                should_reply = True
-                            
-                    if should_reply:
-                        await self.process_ai_reply(message_text, author_name)
-                        
+                # Method 1: Direct InnerTube API Engine
+                if self.innertube_key and self.continuation_token:
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            chat_endpoint = f"https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key={self.innertube_key}"
+                            payload = {
+                                "context": {"client": {"clientName": "WEB", "clientVersion": "2.20240810.00.00"}},
+                                "continuation": self.continuation_token
+                            }
+                            async with session.post(chat_endpoint, json=payload, headers=headers) as chat_res:
+                                if chat_res.status == 200:
+                                    data = await chat_res.json()
+                                    cont_data = data.get("continuationContents", {}).get("liveChatContinuation", {})
+                                    actions = cont_data.get("actions", [])
+                                    
+                                    for act in actions:
+                                        item = act.get("addChatItemAction", {}).get("item", {}).get("liveChatMessageRenderer", {})
+                                        if item:
+                                            msg_id = item.get("id")
+                                            if msg_id and msg_id in self.seen_chat_ids:
+                                                continue
+                                            if msg_id:
+                                                self.seen_chat_ids.add(msg_id)
+                                                if len(self.seen_chat_ids) > 1000:
+                                                    self.seen_chat_ids.clear()
+
+                                            author_name = item.get("authorName", {}).get("simpleText", "Viewer")
+                                            msg_runs = item.get("message", {}).get("runs", [])
+                                            message_text = "".join([r.get("text", "") for r in msg_runs]).strip()
+                                            
+                                            if not message_text:
+                                                continue
+
+                                            thumbnails = item.get("authorPhoto", {}).get("thumbnails", [{}])
+                                            author_icon = thumbnails[-1].get("url") if thumbnails else None
+                                            
+                                            badges = item.get("authorBadges", [])
+                                            is_owner = any("owner" in str(b).lower() or "broadcaster" in str(b).lower() for b in badges)
+                                            is_mod = any("moderator" in str(b).lower() for b in badges)
+                                            is_member = any("member" in str(b).lower() or "sponsor" in str(b).lower() for b in badges)
+
+                                            if self.bot_channel_name:
+                                                stripped_author = author_name.replace('@', '').strip().lower()
+                                                stripped_bot = self.bot_channel_name.replace('@', '').strip().lower()
+                                                if stripped_author == stripped_bot:
+                                                    continue
+
+                                            if message_text in self.sent_messages:
+                                                self.sent_messages.remove(message_text)
+                                                continue
+
+                                            embed = discord.Embed(description=message_text)
+                                            if is_owner:
+                                                self.recent_owner_messages.append(message_text)
+                                                if len(self.recent_owner_messages) > 5:
+                                                    self.recent_owner_messages.pop(0)
+                                                embed.color = discord.Color.red()
+                                                embed.set_author(name=f"👑 [OWNER] {author_name}", icon_url=author_icon)
+                                            elif is_mod:
+                                                embed.color = discord.Color.blue()
+                                                embed.set_author(name=f"🛡️ [MOD] {author_name}", icon_url=author_icon)
+                                            elif is_member:
+                                                embed.color = discord.Color.green()
+                                                embed.set_author(name=f"💎 [MEMBER] {author_name}", icon_url=author_icon)
+                                            else:
+                                                color_val = int(hashlib.md5(author_name.encode()).hexdigest()[:6], 16)
+                                                embed.color = discord.Color(color_val)
+                                                embed.set_author(name=f"[YT] {author_name}", icon_url=author_icon)
+
+                                            await self.sync_channel.send(embed=embed)
+                                            fetched_any = True
+
+                                            msg_lower = message_text.lower()
+                                            trigger_patterns = [
+                                                r'\bggs+\b', r'\bhello+\b', r'\bhi+\b', r'\bheyy*\b', 
+                                                r'how are you', r'\byoo*\b', r'wassup', r'\bsup\b', r"what's up",
+                                                r'\bcode\b', r'\blike\b', r'\blikes\b'
+                                            ]
+                                            should_reply = False
+                                            if is_owner:
+                                                if re.search(r'\bggs+\b', msg_lower) or "ggs-bot" in msg_lower:
+                                                    should_reply = True
+                                            else:
+                                                for pattern in trigger_patterns:
+                                                    if re.search(pattern, msg_lower):
+                                                        should_reply = True
+                                                        break
+                                                if not should_reply and len(msg_lower.split()) >= 3:
+                                                    if random.random() < 0.10:
+                                                        should_reply = True
+                                            if should_reply:
+                                                await self.process_ai_reply(message_text, author_name)
+
+                                    continuations = cont_data.get("continuations", [])
+                                    if continuations:
+                                        c = continuations[0]
+                                        for k in ["invalidationContinuationData", "timedContinuationData", "liveChatReplayContinuationData"]:
+                                            if k in c and "continuation" in c[k]:
+                                                self.continuation_token = c[k]["continuation"]
+                                                break
+                    except Exception as e:
+                        print(f"InnerTube fetch error: {e}")
+
+                # Method 2: pytchat fallback
+                if not fetched_any and self.live_chat and self.live_chat.is_alive():
+                    try:
+                        def fetch_pytchat():
+                            try:
+                                return self.live_chat.get().items
+                            except Exception:
+                                return []
+                        pytchat_items = await asyncio.to_thread(fetch_pytchat)
+                        for c in pytchat_items:
+                            msg_text = c.message
+                            author_name = c.author.name
+                            if msg_text in self.sent_messages:
+                                self.sent_messages.remove(msg_text)
+                                continue
+                            embed = discord.Embed(description=msg_text)
+                            color_val = int(hashlib.md5(author_name.encode()).hexdigest()[:6], 16)
+                            embed.color = discord.Color(color_val)
+                            embed.set_author(name=f"[YT] {author_name}", icon_url=c.author.imageUrl)
+                            await self.sync_channel.send(embed=embed)
+                    except Exception as e:
+                        print(f"Pytchat sync error: {e}")
+
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             pass
