@@ -164,7 +164,7 @@ class YouTubeCog(commands.Cog):
         if self.chat_task:
             self.chat_task.cancel()
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(seconds=30)
     async def auto_detect_loop(self):
         try:
             channel = self.bot.get_channel(int(self.live_chat_channel_id))
