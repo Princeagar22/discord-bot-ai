@@ -190,33 +190,18 @@ class YouTubeCog(commands.Cog):
                     if m2:
                         live_vid = m2.group(1)
 
-            is_actually_live = False
-            if live_vid and has_live_now_flag:
-                is_actually_live = True
-                if self.yt_api:
-                    try:
-                        def check_live():
-                            return self.yt_api.videos().list(part="snippet", id=live_vid).execute()
-                        api_res = await asyncio.to_thread(check_live)
-                        if api_res.get("items"):
-                            content = api_res["items"][0].get("snippet", {}).get("liveBroadcastContent")
-                            if content != "live":
-                                is_actually_live = False
-                                print(f"Auto-detect: API says liveBroadcastContent='{content}' for {live_vid}, not 'live'")
-                    except Exception as e:
-                        # API error — don't override scrape result, trust the HTML flag
-                        print(f"API verification failed (trusting HTML scrape): {e}")
+            is_actually_live = bool(live_vid and has_live_now_flag)
 
             if is_actually_live and live_vid:
                 # Reset offline counter since stream is confirmed live
                 self._offline_checks = 0
                 if self.video_id != live_vid or not self.chat_task or (self.chat_task and self.chat_task.done()):
-                    print(f"Auto-detect: Starting sync for {live_vid}")
+                    print(f"Auto-detect: Stream confirmed LIVE for {live_vid}. Starting sync...")
                     await channel.send(f"🚨 **AUTO-DETECT:** `@{self.youtube_handle}` is now LIVE! (Video ID: `{live_vid}`). Starting chat sync automatically...")
                     await self.start_sync(live_vid, channel)
             else:
                 # If we have an active sync running, require 3 consecutive offline checks
-                # before stopping — YouTube scrape/API can be inconsistent
+                # before stopping — YouTube scrape can be inconsistent
                 if self.video_id and self.chat_task and not self.chat_task.done():
                     self._offline_checks = getattr(self, '_offline_checks', 0) + 1
                     print(f"Auto-detect: Stream appears offline (check {self._offline_checks}/3), but sync is active for {self.video_id}")
