@@ -367,7 +367,13 @@ OUTPUT:
             
             async with message.channel.typing():
                 # ONLY allow tools if admin AND message has an EXPLICIT create/delete keyword
-                TOOL_KEYWORDS = ['create a channel', 'bana do channel', 'channel bana', 'delete messages', 'messages delete', 'purge', 'clear chat']
+                TOOL_KEYWORDS = [
+                    'create a channel', 'create channel', 'make channel', 'new channel', 'bana do channel', 'channel bana',
+                    'delete messages', 'messages delete', 'delete chat', 'delete all', 'delete',
+                    'purge messages', 'purge chat', 'purge',
+                    'clear chat', 'clear all chats', 'clear all', 'clear messages', 'clear this channel', 'clear',
+                    'saaf kar', 'hata do', 'clean'
+                ]
                 explicit_tool_request = is_admin and any(kw in prompt.lower() for kw in TOOL_KEYWORDS)
                 response = await self.query_ai(prompt, user_id_str, context_info, allow_tools=explicit_tool_request)
                 
@@ -407,12 +413,12 @@ OUTPUT:
                         args_str = tool_call['function']['arguments']
                         try:
                             args = json.loads(args_str)
-                            amount = int(args.get('amount', 10))
+                            amount = int(args.get('amount', 100))
                         except:
-                            amount = 10
+                            amount = 100
                             
                         # Limit to 100 max
-                        amount = min(amount, 100)
+                        amount = min(max(amount, 1), 100)
                         
                         try:
                             deleted = await message.channel.purge(limit=amount + 1) # +1 to include the command message
@@ -422,7 +428,12 @@ OUTPUT:
                             self.history[user_id_str].append({"role": "tool", "tool_call_id": tool_call['id'], "content": tool_result})
                             self.save_memory()
                             
-                            await message.channel.send(f"🧹 {message.author.mention}, I used my magical broom to sweep away {len(deleted)-1} messages! ✨")
+                            conf_msg = await message.channel.send(f"🧹 {message.author.mention}, I used my magical broom to sweep away {len(deleted)-1} messages! ✨")
+                            await asyncio.sleep(4)
+                            try:
+                                await conf_msg.delete()
+                            except Exception:
+                                pass
                         except discord.Forbidden:
                             await message.reply(f"❌ {message.author.mention}, I tried to delete messages, but I don't have the 'Manage Messages' permission!")
                         except Exception as e:
@@ -462,6 +473,24 @@ OUTPUT:
         if not ctx.author.guild_permissions.administrator: return
         await self.proactive_chat()
         await ctx.message.add_reaction("✅")
+
+    @commands.command(name="clear", aliases=["purge", "clean"])
+    @commands.has_permissions(administrator=True)
+    async def clear_cmd(self, ctx, amount: int = 100):
+        """Purge / clear messages from the current channel (Admin only)"""
+        amount = min(max(amount, 1), 100)
+        try:
+            deleted = await ctx.channel.purge(limit=amount + 1)
+            conf_msg = await ctx.send(f"🧹 {ctx.author.mention}, cleared {len(deleted)-1} messages! ✨")
+            await asyncio.sleep(4)
+            try:
+                await conf_msg.delete()
+            except Exception:
+                pass
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have the 'Manage Messages' permission to clear chat!")
+        except Exception as e:
+            await ctx.send(f"❌ Error clearing messages: {e}")
 
 async def setup(bot):
     await bot.add_cog(ChatCog(bot))
