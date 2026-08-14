@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands, tasks
-import pytchat
 import asyncio
 import aiohttp
 import re
@@ -8,13 +7,13 @@ import os
 import json
 import hashlib
 import time
+import random
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 class YouTubeCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.live_chat = None
         self.sync_channel = None
         self.video_id = None
         self.chat_task = None
@@ -36,7 +35,6 @@ class YouTubeCog(commands.Cog):
         self.continuation_token = None
         self.innertube_key = None
         self.seen_chat_ids = set()
-        self.sync_start_time_usec = 0
         self.last_ai_reply_time = 0
         
         self.setup_youtube_api()
@@ -165,8 +163,6 @@ class YouTubeCog(commands.Cog):
             self.auto_detect_loop.cancel()
         if self.chat_task:
             self.chat_task.cancel()
-        if self.live_chat:
-            self.live_chat.terminate()
 
     @tasks.loop(minutes=2)
     async def auto_detect_loop(self):
@@ -313,9 +309,6 @@ class YouTubeCog(commands.Cog):
         if self.chat_task:
             self.chat_task.cancel()
             self.chat_task = None
-        if self.live_chat:
-            self.live_chat.terminate()
-            self.live_chat = None
         self.video_id = None
         self.active_live_chat_id = None
         self.continuation_token = None
@@ -531,6 +524,11 @@ class YouTubeCog(commands.Cog):
                                             if ts > getattr(self, 'last_seen_timestamp_usec', 0):
                                                 self.last_seen_timestamp_usec = ts
 
+                                            # FOOLPROOF bot self-detection: use channel ID, not name
+                                            author_channel_id = renderer.get("authorExternalChannelId", "")
+                                            if self.bot_channel_id and author_channel_id == self.bot_channel_id:
+                                                continue
+
                                             author_name = renderer.get("authorName", {}).get("simpleText", "Viewer")
                                             msg_runs = renderer.get("message", {}).get("runs", [])
                                             message_text = "".join([r.get("text", "") for r in msg_runs]).strip()
@@ -538,19 +536,8 @@ class YouTubeCog(commands.Cog):
                                             if not message_text:
                                                 continue
 
-                                            # 1. Hard block any message sent by our bot account or self
-                                            author_clean = author_name.replace('@', '').strip().lower()
-                                            bot_names = ['ggs-bot', 'ggs bot', 'ggs_bot', 'devilyt']
-                                            if self.bot_channel_name:
-                                                bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
-                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
-                                                bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
-
-                                            if author_clean in bot_names or ('ggs' in author_clean and 'bot' in author_clean):
-                                                continue
-
                                             if message_text in self.sent_messages:
-                                                self.sent_messages.remove(message_text)
+                                                self.sent_messages.discard(message_text)
                                                 continue
 
                                             thumbnails = renderer.get("authorPhoto", {}).get("thumbnails", [{}])
@@ -558,6 +545,10 @@ class YouTubeCog(commands.Cog):
                                             
                                             badges = renderer.get("authorBadges", [])
                                             is_owner = any("owner" in str(b).lower() or "broadcaster" in str(b).lower() for b in badges)
+                                            # Also check by channel ID for the streamer
+                                            streamer_channel_id = os.getenv('YOUTUBE_CHANNEL_ID', '').strip().strip('"')
+                                            if streamer_channel_id and author_channel_id == streamer_channel_id:
+                                                is_owner = True
                                             is_mod = any("moderator" in str(b).lower() for b in badges)
                                             is_member = any("member" in str(b).lower() or "sponsor" in str(b).lower() for b in badges)
 
@@ -615,7 +606,7 @@ class YouTubeCog(commands.Cog):
                                                 if random.random() < 0.10:
                                                     should_reply = True
                                             if should_reply:
-                                                await self.process_ai_reply(message_text, author_name)
+                                                await self.process_ai_reply(message_text, author_name, author_channel_id)
 
                                     continuations = cont_data.get("continuations", [])
                                     if continuations:
@@ -636,22 +627,17 @@ class YouTubeCog(commands.Cog):
                 await self.sync_channel.send("⚠️ YouTube sync crashed or stream ended unexpectedly.")
                 self.video_id = None 
 
-    async def process_ai_reply(self, message_text, author_name):
-        clean_author = author_name.replace('@', '').strip()
-        clean_author_lower = clean_author.lower()
-        bot_names = ['ggs-bot', 'ggs bot', 'ggs_bot', 'devilyt']
-        if self.bot_channel_name:
-            bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
-        if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
-            bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
-
-        if clean_author_lower in bot_names or ('ggs' in clean_author_lower and 'bot' in clean_author_lower):
+    async def process_ai_reply(self, message_text, author_name, author_channel_id=""):
+        # Foolproof: skip if this is our own bot's channel ID
+        if self.bot_channel_id and author_channel_id == self.bot_channel_id:
             return
 
         now = time.time()
         if now - self.last_ai_reply_time < 3.0:
             return
         self.last_ai_reply_time = now
+
+        clean_author = author_name.replace('@', '').strip()
 
         chat_cog = self.bot.get_cog("ChatCog")
         if chat_cog:
