@@ -539,29 +539,6 @@ class YouTubeCog(commands.Cog):
                     except Exception as e:
                         print(f"InnerTube fetch error: {e}")
 
-                # Method 2: pytchat fallback
-                if not fetched_any and self.live_chat and self.live_chat.is_alive():
-                    try:
-                        def fetch_pytchat():
-                            try:
-                                return self.live_chat.get().items
-                            except Exception:
-                                return []
-                        pytchat_items = await asyncio.to_thread(fetch_pytchat)
-                        for c in pytchat_items:
-                            msg_text = c.message
-                            author_name = c.author.name
-                            if msg_text in self.sent_messages:
-                                self.sent_messages.remove(msg_text)
-                                continue
-                            embed = discord.Embed(description=msg_text)
-                            color_val = int(hashlib.md5(author_name.encode()).hexdigest()[:6], 16)
-                            embed.color = discord.Color(color_val)
-                            embed.set_author(name=f"[YT] {author_name}", icon_url=c.author.imageUrl)
-                            await self.sync_channel.send(embed=embed)
-                    except Exception as e:
-                        print(f"Pytchat sync error: {e}")
-
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             pass
