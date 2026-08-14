@@ -271,7 +271,9 @@ class YouTubeCog(commands.Cog):
             if m_key:
                 self.innertube_key = m_key.group(1)
                 
-            m_token = re.search(r'"liveChatRenderer":\s*{"header":.+?"continuation":"([^"]+)"', html)
+            m_token = re.search(r'"continuation":"(0ofMy[^"]+)"', html)
+            if not m_token:
+                m_token = re.search(r'"liveChatRenderer":\s*{"header":.+?"continuation":"([^"]+)"', html)
             if not m_token:
                 m_token = re.search(r'"continuation":"([^"]+)"', html)
             if m_token:
@@ -443,9 +445,15 @@ class YouTubeCog(commands.Cog):
                                     actions = cont_data.get("actions", [])
                                     
                                     for act in actions:
-                                        item = act.get("addChatItemAction", {}).get("item", {}).get("liveChatMessageRenderer", {})
-                                        if item:
-                                            msg_id = item.get("id")
+                                        item = act.get("addChatItemAction", {}).get("item", {})
+                                        renderer = (
+                                            item.get("liveChatTextMessageRenderer") or 
+                                            item.get("liveChatMessageRenderer") or 
+                                            item.get("liveChatPaidMessageRenderer") or
+                                            item.get("liveChatMembershipItemRenderer")
+                                        )
+                                        if renderer:
+                                            msg_id = renderer.get("id")
                                             if msg_id and msg_id in self.seen_chat_ids:
                                                 continue
                                             if msg_id:
@@ -453,17 +461,17 @@ class YouTubeCog(commands.Cog):
                                                 if len(self.seen_chat_ids) > 1000:
                                                     self.seen_chat_ids.clear()
 
-                                            author_name = item.get("authorName", {}).get("simpleText", "Viewer")
-                                            msg_runs = item.get("message", {}).get("runs", [])
+                                            author_name = renderer.get("authorName", {}).get("simpleText", "Viewer")
+                                            msg_runs = renderer.get("message", {}).get("runs", [])
                                             message_text = "".join([r.get("text", "") for r in msg_runs]).strip()
                                             
                                             if not message_text:
                                                 continue
 
-                                            thumbnails = item.get("authorPhoto", {}).get("thumbnails", [{}])
+                                            thumbnails = renderer.get("authorPhoto", {}).get("thumbnails", [{}])
                                             author_icon = thumbnails[-1].get("url") if thumbnails else None
                                             
-                                            badges = item.get("authorBadges", [])
+                                            badges = renderer.get("authorBadges", [])
                                             is_owner = any("owner" in str(b).lower() or "broadcaster" in str(b).lower() for b in badges)
                                             is_mod = any("moderator" in str(b).lower() for b in badges)
                                             is_member = any("member" in str(b).lower() or "sponsor" in str(b).lower() for b in badges)
