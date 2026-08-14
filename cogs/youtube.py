@@ -244,6 +244,7 @@ class YouTubeCog(commands.Cog):
         self.video_id = video_id
         self.sync_channel = channel
         self.seen_chat_ids.clear()
+        self.is_first_sync_poll = True
         
         # Clear the old chat before starting the new one
         try:
@@ -447,6 +448,31 @@ class YouTubeCog(commands.Cog):
                                     cont_data = data.get("continuationContents", {}).get("liveChatContinuation", {})
                                     actions = cont_data.get("actions", [])
                                     
+                                    # First poll on connection: fast-forward past history without spamming Discord/YouTube
+                                    if getattr(self, 'is_first_sync_poll', False):
+                                        for act in actions:
+                                            item = act.get("addChatItemAction", {}).get("item", {})
+                                            renderer = (
+                                                item.get("liveChatTextMessageRenderer") or 
+                                                item.get("liveChatMessageRenderer") or 
+                                                item.get("liveChatPaidMessageRenderer") or
+                                                item.get("liveChatMembershipItemRenderer")
+                                            )
+                                            if renderer:
+                                                msg_id = renderer.get("id")
+                                                if msg_id:
+                                                    self.seen_chat_ids.add(msg_id)
+                                        self.is_first_sync_poll = False
+                                        continuations = cont_data.get("continuations", [])
+                                        if continuations:
+                                            c = continuations[0]
+                                            for k in ["invalidationContinuationData", "timedContinuationData", "liveChatReplayContinuationData"]:
+                                                if k in c and "continuation" in c[k]:
+                                                    self.continuation_token = c[k]["continuation"]
+                                                    break
+                                        await asyncio.sleep(1)
+                                        continue
+
                                     for act in actions:
                                         item = act.get("addChatItemAction", {}).get("item", {})
                                         renderer = (
