@@ -202,19 +202,33 @@ class YouTubeCog(commands.Cog):
                             content = api_res["items"][0].get("snippet", {}).get("liveBroadcastContent")
                             if content != "live":
                                 is_actually_live = False
+                                print(f"Auto-detect: API says liveBroadcastContent='{content}' for {live_vid}, not 'live'")
                     except Exception as e:
-                        print(f"API verification failed: {e}")
+                        # API error — don't override scrape result, trust the HTML flag
+                        print(f"API verification failed (trusting HTML scrape): {e}")
 
             if is_actually_live and live_vid:
-                if self.video_id != live_vid or not self.chat_task:
+                # Reset offline counter since stream is confirmed live
+                self._offline_checks = 0
+                if self.video_id != live_vid or not self.chat_task or (self.chat_task and self.chat_task.done()):
+                    print(f"Auto-detect: Starting sync for {live_vid}")
                     await channel.send(f"🚨 **AUTO-DETECT:** `@{self.youtube_handle}` is now LIVE! (Video ID: `{live_vid}`). Starting chat sync automatically...")
                     await self.start_sync(live_vid, channel)
             else:
-                # Channel is offline -> LOCK livechat channel
-                await self.set_channel_lock(channel, locked=True)
-                if self.video_id and self.chat_task:
-                    await channel.send("🛑 **AUTO-DETECT:** Stream is offline. Locking `#🔴・livechat` channel.")
-                    await self.stop_sync()
+                # If we have an active sync running, require 3 consecutive offline checks
+                # before stopping — YouTube scrape/API can be inconsistent
+                if self.video_id and self.chat_task and not self.chat_task.done():
+                    self._offline_checks = getattr(self, '_offline_checks', 0) + 1
+                    print(f"Auto-detect: Stream appears offline (check {self._offline_checks}/3), but sync is active for {self.video_id}")
+                    if self._offline_checks >= 3:
+                        print(f"Auto-detect: 3 consecutive offline checks — stopping sync for {self.video_id}")
+                        await channel.send("🛑 **AUTO-DETECT:** Stream is offline. Locking `#🔴・livechat` channel.")
+                        await self.stop_sync()
+                        self._offline_checks = 0
+                else:
+                    # No active sync — just make sure channel is locked
+                    await self.set_channel_lock(channel, locked=True)
+                    self._offline_checks = 0
 
         except Exception as e:
             print(f"Auto-detect error: {e}")
