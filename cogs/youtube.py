@@ -60,12 +60,14 @@ class YouTubeCog(commands.Cog):
                 self.yt_api = build('youtube', 'v3', credentials=creds)
                 print("YouTube API successfully authorized!")
                 
-                # Fetch bot's own channel ID and name to prevent echo loops
+                # Fetch bot's own channel ID, title, and customUrl to prevent echo loops
                 channel_response = self.yt_api.channels().list(mine=True, part="id,snippet").execute()
                 if channel_response.get("items"):
-                    self.bot_channel_id = channel_response["items"][0]["id"]
-                    self.bot_channel_name = channel_response["items"][0]["snippet"]["title"]
-                    print(f"Bot authenticated as: {self.bot_channel_name} (ID: {self.bot_channel_id})")
+                    item = channel_response["items"][0]
+                    self.bot_channel_id = item["id"]
+                    self.bot_channel_name = item["snippet"]["title"]
+                    self.bot_custom_url = item["snippet"].get("customUrl", "")
+                    print(f"Bot authenticated as: {self.bot_channel_name} ({self.bot_custom_url}) (ID: {self.bot_channel_id})")
             else:
                 print("Warning: No YouTube token found. The bot will not be able to reply on YouTube.")
         except Exception as e:
@@ -477,15 +479,31 @@ class YouTubeCog(commands.Cog):
                                             is_mod = any("moderator" in str(b).lower() for b in badges)
                                             is_member = any("member" in str(b).lower() or "sponsor" in str(b).lower() for b in badges)
 
+                                            # Filter out messages sent by our own bot account to prevent infinite echo loops
+                                            author_clean = author_name.replace('@', '').strip().lower()
+                                            bot_names = ['ggs-bot', 'ggs bot', 'devilyt']
                                             if self.bot_channel_name:
-                                                stripped_author = author_name.replace('@', '').strip().lower()
-                                                stripped_bot = self.bot_channel_name.replace('@', '').strip().lower()
-                                                if stripped_author == stripped_bot:
-                                                    continue
+                                                bot_names.append(self.bot_channel_name.replace('@', '').strip().lower())
+                                            if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
+                                                bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
+                                                
+                                            if author_clean in bot_names:
+                                                continue
 
                                             if message_text in self.sent_messages:
                                                 self.sent_messages.remove(message_text)
                                                 continue
+
+                                            # If streamer updates code/region in YouTube chat directly:
+                                            if is_owner:
+                                                if msg_lower.startswith('!code ') or msg_lower.startswith('code '):
+                                                    val = message_text.split(maxsplit=1)[1].strip()
+                                                    self.party_code = val
+                                                    await self.sync_channel.send(f"🎮 **Party Code updated from stream:** `{self.party_code}`")
+                                                elif msg_lower.startswith('!region ') or msg_lower.startswith('region '):
+                                                    val = message_text.split(maxsplit=1)[1].strip()
+                                                    self.server_region = val
+                                                    await self.sync_channel.send(f"🌐 **Server Region updated from stream:** `{self.server_region}`")
 
                                             embed = discord.Embed(description=message_text)
                                             if is_owner:
@@ -515,17 +533,13 @@ class YouTubeCog(commands.Cog):
                                                 r'\bcode\b', r'\bparty\b', r'\bregion\b', r'\bserver\b', r'\blike\b', r'\blikes\b'
                                             ]
                                             should_reply = False
-                                            if is_owner:
-                                                if re.search(r'\bggs+\b', msg_lower) or "ggs-bot" in msg_lower:
+                                            for pattern in trigger_patterns:
+                                                if re.search(pattern, msg_lower):
                                                     should_reply = True
-                                            else:
-                                                for pattern in trigger_patterns:
-                                                    if re.search(pattern, msg_lower):
-                                                        should_reply = True
-                                                        break
-                                                if not should_reply and len(msg_lower.split()) >= 3:
-                                                    if random.random() < 0.10:
-                                                        should_reply = True
+                                                    break
+                                            if not should_reply and len(msg_lower.split()) >= 3:
+                                                if random.random() < 0.10:
+                                                    should_reply = True
                                             if should_reply:
                                                 await self.process_ai_reply(message_text, author_name)
 
@@ -555,14 +569,16 @@ class YouTubeCog(commands.Cog):
             prompt = message_text
             
             owner_context = "\n".join(self.recent_owner_messages[-3:]) if self.recent_owner_messages else "None"
+            code_str = self.party_code if self.party_code else "not shared yet"
+            region_str = self.server_region if self.server_region else "not specified yet"
+            
             context_info = (
                 f"Stream chat context: You're watching an Agar.io mobile stream. "
-                f"The streamer is @ZipAgar. "
-                f"Current viewers: {self.stream_stats.get('viewers', '?')}, likes: {self.stream_stats.get('likes', '?')}. "
-                f"Recent things @ZipAgar said: {owner_context}. "
+                f"The streamer is @{self.youtube_handle}. "
+                f"Current Party Code: {code_str}. Current Region: {region_str}. "
+                f"Recent things @{self.youtube_handle} said: {owner_context}. "
                 f"You are a human mod/viewer. Keep your reply to 1-2 short sentences. "
-                f"If they ask about codes or likes, only say what @ZipAgar actually mentioned - don't make up numbers or goals. "
-                f"If he said nothing about codes, say something like 'haven't heard anything about a code yet'. "
+                f"If they ask for code or region, give the current party code ({code_str}) and region ({region_str}). "
                 f"Sound like a real person. No bot vibes."
             )
             
@@ -574,8 +590,6 @@ class YouTubeCog(commands.Cog):
                 if response['type'] == 'message':
                     # Add mention back so it's clear who the bot is talking to on YouTube
                     reply_text = f"@{clean_author} {response['data']}"
-                    
-                    # YouTube Live Chat completely rejects messages containing < or > (HTML/XML tags)
                     reply_text = reply_text.replace('<', '').replace('>', '')
                     
                     if len(reply_text) > 200:
@@ -590,7 +604,6 @@ class YouTubeCog(commands.Cog):
                         success = await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, reply_text)
                         if not success:
                             self.sent_messages.discard(reply_text)
-                            await self.sync_channel.send(f"⚠️ Failed to send message to YouTube.")
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -606,8 +619,13 @@ class YouTubeCog(commands.Cog):
         if not self.active_live_chat_id or not self.chat_task:
             return
             
+        content_str = message.content.strip()
+        # Do NOT forward bot commands or admin actions to YouTube Live Chat!
+        if content_str.startswith('!') or content_str.lower().startswith('ggs') or content_str.lower().startswith('@ggs'):
+            return
+
         # Forward message to YouTube with an @ mention style
-        reply_text = f"@{message.author.display_name}: {message.content}"
+        reply_text = f"@{message.author.display_name}: {content_str}"
         
         if len(reply_text) > 200:
             reply_text = reply_text[:197] + "..."
