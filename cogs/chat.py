@@ -361,7 +361,14 @@ OUTPUT:
                 prompt = stripped if stripped else 'ggs'
             
             guild = message.channel.guild
-            is_admin = getattr(message.author, 'guild_permissions', None) and message.author.guild_permissions.administrator
+            is_admin = (
+                message.author == guild.owner or 
+                (hasattr(message.author, 'guild_permissions') and (
+                    message.author.guild_permissions.administrator or 
+                    message.author.guild_permissions.manage_messages or 
+                    message.author.guild_permissions.manage_channels
+                ))
+            )
             context_info = f"Discord server: '{guild.name}'."
             user_id_str = str(message.author.id)
             
