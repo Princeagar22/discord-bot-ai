@@ -250,7 +250,7 @@ class YouTubeCog(commands.Cog):
         self.sync_channel = channel
         self.seen_chat_ids.clear()
         self.is_first_sync_poll = True
-        self.sync_start_time_usec = int(time.time() * 1_000_000)
+        self.last_seen_timestamp_usec = 0
         self.last_ai_reply_time = time.time()
         
         # Clear the old chat before starting the new one
@@ -475,6 +475,7 @@ class YouTubeCog(commands.Cog):
                                     
                                     # First poll on connection: fast-forward past history without spamming Discord/YouTube
                                     if getattr(self, 'is_first_sync_poll', False):
+                                        timestamps = []
                                         for act in actions:
                                             item = act.get("addChatItemAction", {}).get("item", {})
                                             renderer = (
@@ -487,7 +488,14 @@ class YouTubeCog(commands.Cog):
                                                 msg_id = renderer.get("id")
                                                 if msg_id:
                                                     self.seen_chat_ids.add(msg_id)
+                                                ts = int(renderer.get("timestampUsec", 0))
+                                                if ts > 0:
+                                                    timestamps.append(ts)
+                                                    
+                                        if timestamps:
+                                            self.last_seen_timestamp_usec = max(timestamps)
                                         self.is_first_sync_poll = False
+                                        
                                         continuations = cont_data.get("continuations", [])
                                         if continuations:
                                             c = continuations[0]
@@ -510,10 +518,18 @@ class YouTubeCog(commands.Cog):
                                             msg_id = renderer.get("id")
                                             if msg_id and msg_id in self.seen_chat_ids:
                                                 continue
+
+                                            ts = int(renderer.get("timestampUsec", 0))
+                                            if getattr(self, 'last_seen_timestamp_usec', 0) > 0 and ts > 0 and ts <= self.last_seen_timestamp_usec:
+                                                continue
+
                                             if msg_id:
                                                 self.seen_chat_ids.add(msg_id)
                                                 if len(self.seen_chat_ids) > 1000:
                                                     self.seen_chat_ids.clear()
+                                                    
+                                            if ts > getattr(self, 'last_seen_timestamp_usec', 0):
+                                                self.last_seen_timestamp_usec = ts
 
                                             author_name = renderer.get("authorName", {}).get("simpleText", "Viewer")
                                             msg_runs = renderer.get("message", {}).get("runs", [])
@@ -530,7 +546,7 @@ class YouTubeCog(commands.Cog):
                                             if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
                                                 bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
 
-                                            if author_clean in bot_names:
+                                            if author_clean in bot_names or ('ggs' in author_clean and 'bot' in author_clean):
                                                 continue
 
                                             if message_text in self.sent_messages:
