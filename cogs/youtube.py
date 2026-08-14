@@ -512,7 +512,7 @@ class YouTubeCog(commands.Cog):
                                             trigger_patterns = [
                                                 r'\bggs+\b', r'\bhello+\b', r'\bhi+\b', r'\bheyy*\b', 
                                                 r'how are you', r'\byoo*\b', r'wassup', r'\bsup\b', r"what's up",
-                                                r'\bcode\b', r'\blike\b', r'\blikes\b'
+                                                r'\bcode\b', r'\bparty\b', r'\bregion\b', r'\bserver\b', r'\blike\b', r'\blikes\b'
                                             ]
                                             should_reply = False
                                             if is_owner:
