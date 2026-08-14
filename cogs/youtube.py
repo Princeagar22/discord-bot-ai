@@ -574,14 +574,29 @@ class YouTubeCog(commands.Cog):
                                                     val = message_text.split(maxsplit=1)[1].strip()
                                                     self.remembered_info = val
                                                     await self.sync_channel.send(f"🧠 **Remembered Info updated from stream:** `{self.remembered_info}`")
+                                                    if self.active_live_chat_id:
+                                                        confirm_msg = f"🧠 Info updated: {self.remembered_info}"
+                                                        self.sent_messages.add(confirm_msg)
+                                                        await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, confirm_msg)
+                                                    continue
                                                 elif msg_lower.startswith('!code ') or msg_lower.startswith('code '):
                                                     val = message_text.split(maxsplit=1)[1].strip()
                                                     self.party_code = val
                                                     await self.sync_channel.send(f"🎮 **Party Code updated from stream:** `{self.party_code}`")
+                                                    if self.active_live_chat_id:
+                                                        confirm_msg = f"🎮 Party code: {self.party_code}"
+                                                        self.sent_messages.add(confirm_msg)
+                                                        await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, confirm_msg)
+                                                    continue
                                                 elif msg_lower.startswith('!region ') or msg_lower.startswith('region '):
                                                     val = message_text.split(maxsplit=1)[1].strip()
                                                     self.server_region = val
                                                     await self.sync_channel.send(f"🌐 **Server Region updated from stream:** `{self.server_region}`")
+                                                    if self.active_live_chat_id:
+                                                        confirm_msg = f"🌐 Region: {self.server_region}"
+                                                        self.sent_messages.add(confirm_msg)
+                                                        await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, confirm_msg)
+                                                    continue
 
                                             embed = discord.Embed(description=message_text)
                                             if is_owner:
@@ -609,7 +624,7 @@ class YouTubeCog(commands.Cog):
                                                 r'how are you', r'\byoo*\b', r'wassup', r'\bsup\b', r"what's up",
                                                 r'\bcode\b', r'\bkode\b', r'\bparty\b', r'\bregion\b', r'\bserver\b',
                                                 r'\bdiscord\b', r'\bdc\b', r'\blink\b', r'\bserver link\b',
-                                                r'\blike\b', r'\blikes\b'
+                                                r'\blike\b', r'\blikes\b', r'\binfo\b', r'\bhelp\b'
                                             ]
                                             should_reply = False
                                             for pattern in trigger_patterns:
@@ -617,7 +632,7 @@ class YouTubeCog(commands.Cog):
                                                     should_reply = True
                                                     break
                                             if not should_reply and len(msg_lower.split()) >= 3:
-                                                if random.random() < 0.10:
+                                                if random.random() < 0.15:
                                                     should_reply = True
                                             if should_reply:
                                                 await self.process_ai_reply(message_text, author_name, author_channel_id)
@@ -647,7 +662,7 @@ class YouTubeCog(commands.Cog):
             return
 
         now = time.time()
-        if now - self.last_ai_reply_time < 3.0:
+        if now - self.last_ai_reply_time < 1.5:
             return
         self.last_ai_reply_time = now
 
