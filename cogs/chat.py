@@ -173,7 +173,18 @@ Never say: "How can I assist you?", "How may I help?", "Is there anything I can 
 Never sound like customer support, a receptionist, a formal moderator, or an AI assistant.
 
 ==================================================
-16. SILENT RESPONSE SANITY CHECK
+17. DISCORD SERVER INVITE LINK & COMMUNITY
+==================================================
+Official Discord Invite Link: https://discord.gg/yDMgbxp9n
+- Whenever anyone asks for the Discord link, server link, DC link, invite link, or community:
+  Provide the link: https://discord.gg/yDMgbxp9n
+- You can also casually invite them or ask if they want to join in their language:
+  - Hindi/Hinglish: "discord join karna hai to kar lo: https://discord.gg/yDMgbxp9n", "aa jao discord pe: https://discord.gg/yDMgbxp9n", "link ye raha: https://discord.gg/yDMgbxp9n"
+  - English: "you can join our discord here: https://discord.gg/yDMgbxp9n", "here's the discord: https://discord.gg/yDMgbxp9n"
+- Always match the user's language naturally (Hindi, Hinglish, English, etc.).
+
+==================================================
+18. SILENT RESPONSE SANITY CHECK
 ==================================================
 Before outputting, silently check:
 Does this directly respond to the latest message? Does it fit recent context? Is the language correct? Would a real Discord user type this? Am I sounding like an AI assistant? Am I giving consecutive empty responses?
@@ -186,6 +197,8 @@ OUTPUT:
         yt_cog = self.bot.get_cog('YouTubeCog')
         if yt_cog:
             stream_info_items = []
+            if getattr(yt_cog, 'remembered_info', None):
+                stream_info_items.append(f"- Streamer Remembered Info (Code/Region/Info): {yt_cog.remembered_info}")
             if yt_cog.party_code:
                 stream_info_items.append(f"- Active Party / Room Code: {yt_cog.party_code}")
             if yt_cog.server_region:
@@ -193,7 +206,7 @@ OUTPUT:
             if yt_cog.pinned_banner:
                 stream_info_items.append(f"- Pinned Stream Announcement: {yt_cog.pinned_banner}")
             if stream_info_items:
-                system_prompt += "\n\nLIVE STREAM FACTS:\n" + "\n".join(stream_info_items)
+                system_prompt += "\n\nLIVE STREAM FACTS (Use these when asked about code/kode/region/server):\n" + "\n".join(stream_info_items)
 
         if user_id_str not in self.history:
             self.history[user_id_str] = []

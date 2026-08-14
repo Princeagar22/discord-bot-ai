@@ -29,6 +29,7 @@ class YouTubeCog(commands.Cog):
         self.recent_owner_messages = []
         self.party_code = None
         self.server_region = None
+        self.remembered_info = None
         self.pinned_banner = None
         self.continuation_token = None
         self.innertube_key = None
@@ -415,6 +416,29 @@ class YouTubeCog(commands.Cog):
         embed.set_footer(text=f"YouTube: https://www.youtube.com/@{self.youtube_handle}")
         await ctx.send(embed=embed)
 
+    @commands.command(name="remember", aliases=["saveinfo", "setinfo"])
+    async def remember_cmd(self, ctx, *, info_text: str = None):
+        if info_text:
+            self.remembered_info = info_text.strip()
+            embed = discord.Embed(
+                title="🧠 Memory Updated!",
+                description=f"GGS Remembered:\n**`{self.remembered_info}`**",
+                color=discord.Color.teal()
+            )
+            await ctx.send(embed=embed)
+            if self.active_live_chat_id:
+                await asyncio.to_thread(self.post_youtube_message, self.active_live_chat_id, f"🧠 INFO: {self.remembered_info}")
+        else:
+            if self.remembered_info:
+                await ctx.send(f"🧠 Currently Remembered Info: **`{self.remembered_info}`**")
+            else:
+                await ctx.send("🧠 No info is remembered. Use `!remember <text>` (e.g. `!remember ap-southeast-1 burst Code- A93P78`).")
+
+    @commands.command(name="forget", aliases=["clearremember"])
+    async def forget_cmd(self, ctx):
+        self.remembered_info = None
+        await ctx.send("🧠 Remembered info cleared.")
+
     @commands.command(name="announce", aliases=["say"])
     @commands.has_permissions(administrator=True)
     async def announce_cmd(self, ctx, *, message_text: str):
@@ -513,16 +537,22 @@ class YouTubeCog(commands.Cog):
                                             if getattr(self, 'bot_custom_url', None) and self.bot_custom_url:
                                                 bot_names.append(self.bot_custom_url.replace('@', '').strip().lower())
                                                 
-                                            if author_clean in bot_names:
+                                            if author_clean in bot_names or ('ggs' in author_clean and 'bot' in author_clean):
                                                 continue
 
                                             if message_text in self.sent_messages:
                                                 self.sent_messages.remove(message_text)
                                                 continue
 
-                                            # If streamer updates code/region in YouTube chat directly:
+                                            msg_lower = message_text.lower()
+
+                                            # If streamer updates code/region/remembered info in YouTube chat directly:
                                             if is_owner:
-                                                if msg_lower.startswith('!code ') or msg_lower.startswith('code '):
+                                                if msg_lower.startswith('!remember ') or msg_lower.startswith('remember '):
+                                                    val = message_text.split(maxsplit=1)[1].strip()
+                                                    self.remembered_info = val
+                                                    await self.sync_channel.send(f"🧠 **Remembered Info updated from stream:** `{self.remembered_info}`")
+                                                elif msg_lower.startswith('!code ') or msg_lower.startswith('code '):
                                                     val = message_text.split(maxsplit=1)[1].strip()
                                                     self.party_code = val
                                                     await self.sync_channel.send(f"🎮 **Party Code updated from stream:** `{self.party_code}`")
@@ -552,11 +582,12 @@ class YouTubeCog(commands.Cog):
                                             await self.sync_channel.send(embed=embed)
                                             fetched_any = True
 
-                                            msg_lower = message_text.lower()
                                             trigger_patterns = [
                                                 r'\bggs+\b', r'\bhello+\b', r'\bhi+\b', r'\bheyy*\b', 
                                                 r'how are you', r'\byoo*\b', r'wassup', r'\bsup\b', r"what's up",
-                                                r'\bcode\b', r'\bparty\b', r'\bregion\b', r'\bserver\b', r'\blike\b', r'\blikes\b'
+                                                r'\bcode\b', r'\bkode\b', r'\bparty\b', r'\bregion\b', r'\bserver\b',
+                                                r'\bdiscord\b', r'\bdc\b', r'\blink\b', r'\bserver link\b',
+                                                r'\blike\b', r'\blikes\b'
                                             ]
                                             should_reply = False
                                             for pattern in trigger_patterns:
@@ -595,16 +626,20 @@ class YouTubeCog(commands.Cog):
             prompt = message_text
             
             owner_context = "\n".join(self.recent_owner_messages[-3:]) if self.recent_owner_messages else "None"
+            remembered_str = self.remembered_info if self.remembered_info else "none"
             code_str = self.party_code if self.party_code else "not shared yet"
             region_str = self.server_region if self.server_region else "not specified yet"
             
             context_info = (
                 f"Stream chat context: You're watching an Agar.io mobile stream. "
                 f"The streamer is @{self.youtube_handle}. "
+                f"Streamer Remembered Info: {remembered_str}. "
                 f"Current Party Code: {code_str}. Current Region: {region_str}. "
+                f"Official Discord link: https://discord.gg/yDMgbxp9n "
                 f"Recent things @{self.youtube_handle} said: {owner_context}. "
                 f"You are a human mod/viewer. Keep your reply to 1-2 short sentences. "
-                f"If they ask for code or region, give the current party code ({code_str}) and region ({region_str}). "
+                f"If they ask for code, kode, region, or server, provide the remembered info ({remembered_str}) or party code/region. "
+                f"If they ask for Discord link or server link, provide https://discord.gg/yDMgbxp9n and naturally ask or invite them in their language. "
                 f"Sound like a real person. No bot vibes."
             )
             
